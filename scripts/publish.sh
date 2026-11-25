@@ -59,10 +59,10 @@ fi
 git config user.name "pkg-overlay bot"
 git config user.email "pkg-overlay@users.noreply.github.com"
 
-if git diff --quiet -- state; then
+git add state
+if git diff --cached --quiet -- state; then
     log "state unchanged"
 else
-    git add state
     git commit -m "state: record built package versions"
     git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
     git push origin "HEAD:${GITHUB_REF_NAME:-main}"
