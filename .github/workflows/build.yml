@@ -51,19 +51,14 @@ jobs:
           pacman -Sy --noconfirm --needed git
           sed -i '/^\[options\]/a DisableSandboxNetwork' /etc/pacman.conf
           if ! grep -q '^\[cachyos-extra-v3\]' /etc/pacman.conf; then
-            printf '%s\n' \
-              '' \
-              '[cachyos-v3]' \
-              'Include = /etc/pacman.d/cachyos-v3-mirrorlist' \
-              '' \
-              '[cachyos-core-v3]' \
-              'Include = /etc/pacman.d/cachyos-v3-mirrorlist' \
-              '' \
-              '[cachyos-extra-v3]' \
-              'Include = /etc/pacman.d/cachyos-v3-mirrorlist' \
-              >> /etc/pacman.conf
+            # CachyOS must come *before* core/extra: pacman gives the first
+            # repository priority, exactly like the target machine.
+            sed -i '/^\[cachyos\]$/i [cachyos-v3]\nInclude = /etc/pacman.d/cachyos-v3-mirrorlist\n\n[cachyos-core-v3]\nInclude = /etc/pacman.d/cachyos-v3-mirrorlist\n\n[cachyos-extra-v3]\nInclude = /etc/pacman.d/cachyos-v3-mirrorlist\n' /etc/pacman.conf
           fi
           pacman -Sy --noconfirm
+          echo "-- priority check --"
+          pacman -Si hyprgraphics | awk -F': *' '/^Repository/{print; exit}'
+          pacman -Si hyprland | awk -F': *' '/^Repository/{print; exit}'
       - uses: actions/checkout@v4
       - name: Build ${{ matrix.pkg }}
         run: scripts/ci-build.sh "${{ matrix.pkg }}"

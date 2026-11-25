@@ -24,7 +24,9 @@ for dir in "$out"/*/; do
 
     cp -f "${built[@]}" "$repo/"
     mkdir -p "$ROOT/state"
-    printf '%s\n' "$version" > "$ROOT/state/$name.txt"
+    upstream=""
+    [[ -f "$dir/UPSTREAM" ]] && upstream="$(cat "$dir/UPSTREAM")"
+    printf '%s %s\n' "$version" "${upstream:-$version}" > "$ROOT/state/$name.txt"
     packages+=("${built[@]}")
     log "$name $version"
 done

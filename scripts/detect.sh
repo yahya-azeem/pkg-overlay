@@ -13,13 +13,15 @@ while IFS= read -r dir; do
     (
         unset TRACK UPSTREAM BUILD
         source "$dir/meta.sh"
-        want="$(desired_version)" || { warn "$name: upstream lookup failed, skipping"; exit 0; }
+        want="$(desired_version "$dir")" || { warn "$name: upstream lookup failed, skipping"; exit 0; }
+        want_up="$(desired_upstream)"
         have="$(state_version "$dir")"
-        if [[ "$want" != "$have" ]]; then
-            log "$name: ${have:-<not built>} -> $want" >&2
-            printf 'changed %s\n' "$name"
+        have_up="$(state_upstream "$dir")"
+        if [[ -n "$have" && "$want_up" == "$have_up" ]]; then
+            log "$name: $have (current, upstream $want_up)" >&2
         else
-            log "$name: $want (current)" >&2
+            log "$name: ${have:-<not built>} -> $want (upstream ${have_up:-none} -> $want_up)" >&2
+            printf 'changed %s\n' "$name"
         fi
     ) | while read -r kind pkg; do
         [[ "$kind" == changed ]] && printf '%s\n' "$pkg" >> "$changed_file"

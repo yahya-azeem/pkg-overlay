@@ -2,37 +2,76 @@
 # Build Hyprland from the Arch PKGBUILD that CachyOS uses, with the
 # no_screen_share omission patch applied.
 #
+# The build environment must give the CachyOS repositories priority, exactly
+# like the target machine; otherwise the package links against Arch sonames
+# that CachyOS has not rebuilt yet.
+#
 # Usage:
 #   build.sh --print-deps     print build dependencies (PKGBUILD generated)
 #   build.sh <outdir>         build; packages + VERSION are written to <outdir>
 set -Eeuo pipefail
 
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$DIR/../.." && pwd)"
 PATCH="$DIR/noscreenshare-omit.patch"
 CONF="$DIR/makepkg-v3.conf"
-source "$(cd -- "$DIR/../.." && pwd)/scripts/lib.sh"
+
+# shellcheck source=../../scripts/lib.sh
+source "$ROOT/scripts/lib.sh"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 
-# The version a full `pacman -Syu` would land on: the newest across every
-# enabled repo (CachyOS x86_64_v3 and Arch extra currently diverge).
-target_version() {
-    pacman -Si hyprland | awk -F': *' '/^Version/ { print $2 }' | sort -V | tail -1
+# CachyOS's version is the one pacman actually selects (repo priority).
+cachyos_version() {
+    pacman -Si hyprland | awk -F': *' '
+        /^Repository/ { repo = $2 }
+        /^Version/    { if (repo ~ /^cachyos/) { print $2; exit } }
+    '
+}
+
+extra_version() {
+    pacman -Si hyprland | awk -F': *' '
+        /^Repository/ { repo = $2 }
+        /^Version/    { if (repo == "extra") { print $2; exit } }
+    '
 }
 
 generate_pkgbuild() {
-    local ver base rel arch_rel our_rel tag url tmp patch_sha
-    ver="$(target_version)"
-    [[ -n "$ver" ]] || die "cannot read hyprland version from pacman"
-    ver="${ver#*:}"
+    local ver base rel floor our_rel prev prev_base prev_rel arch arel tag url tmp patch_sha
+    local base_plus prev_plus
+
+    ver="$(cachyos_version)"
+    [[ -n "$ver" ]] || die "cannot read CachyOS hyprland version with pacman"
 
     base="${ver%-*}"
     rel="${ver##*-}"
-    arch_rel="${rel%%.*}"
-    our_rel="$(awk -v r="$rel" 'BEGIN { printf "%.1f", r + 0.1 }')"
+    floor="$rel"
 
-    tag="$base-$arch_rel"
+    # Arch's pkgrel is only a version floor; dependencies come from the
+    # CachyOS repos because pacman gives them priority on the target system.
+    arch="$(extra_version || true)"
+    if [[ -n "$arch" ]]; then
+        arel="${arch##*-}"
+        floor="$(newest_version "$rel" "$arel")"
+    fi
+    base_plus="$(awk -v r="$floor" 'BEGIN { printf "%.1f", r + 0.1 }')"
+    our_rel="$base_plus"
+
+    # Keep the published pkgrel monotonic when a rebuild is triggered by a
+    # dependency/toolchain change rather than an upstream version change.
+    prev="$(awk 'NR==1 { print $1 }' "$ROOT/state/hyprland.txt" 2>/dev/null || true)"
+    if [[ -n "$prev" ]]; then
+        prev_base="${prev%-*}"
+        prev_rel="${prev##*-}"
+        if [[ "$prev_base" == "$base" ]]; then
+            prev_plus="$(awk -v r="$prev_rel" 'BEGIN { printf "%.1f", r + 0.1 }')"
+            our_rel="$(newest_version "$base_plus" "$prev_plus")"
+        fi
+    fi
+
+    # Arch packaging tag for the CachyOS release we are tracking.
+    tag="$base-${rel%%.*}"
     url="https://gitlab.archlinux.org/archlinux/packaging/packages/hyprland/-/raw/$tag/PKGBUILD"
     log "fetching Arch PKGBUILD $tag" >&2
     tmp="$(mktemp)"
@@ -40,11 +79,11 @@ generate_pkgbuild() {
         || die "could not download $url"
 
     grep -qx "pkgver=$base" "$tmp" || die "PKGBUILD does not declare pkgver=$base"
-    grep -qx "pkgrel=$arch_rel" "$tmp" || die "PKGBUILD does not declare pkgrel=$arch_rel"
+    grep -qx "pkgrel=${rel%%.*}" "$tmp" || die "PKGBUILD does not declare pkgrel=${rel%%.*}"
 
     patch_sha="$(sha256sum "$PATCH" | awk '{print $1}')"
 
-    python3 - "$tmp" "$our_rel" "$patch_sha" <<'PY'
+    python3 - "$tmp" "$our_rel" "$patch_sha" <<'PYEOF'
 import pathlib
 import re
 import sys
@@ -73,7 +112,7 @@ s = s.replace(
 )
 
 pkgbuild.write_text(s)
-PY
+PYEOF
 
     cp "$tmp" "$DIR/PKGBUILD"
     rm -f "$tmp"
@@ -94,7 +133,7 @@ mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 
 version="$(generate_pkgbuild)"
-log "building hyprland $version (x86_64_v3)"
+log "building hyprland $version against CachyOS repo versions"
 
 rm -rf "$DIR/src" "$DIR/pkg"
 export PKGDEST="$out"
@@ -122,8 +161,17 @@ if ! grep -aq 'render:no_screen_share_omit' "$bin_tmp"; then
 fi
 rm -f "$bin_tmp"
 
+# The package must link the same hyprgraphics soname that CachyOS currently
+# ships; otherwise installing it would force Arch's newer library and break
+# hyprlock/hyprtoolkit.
+gfx_so="$(ls /usr/lib/libhyprgraphics.so.* 2>/dev/null | sed 's/.*\.so\.//' | sort -V | tail -1)"
+if [[ -n "$gfx_so" ]] && ! grep -q "libhyprgraphics.so=$gfx_so-64" <<<"$pkginfo"; then
+    die "package does not match the installed CachyOS hyprgraphics soname $gfx_so"
+fi
+
 # CachyOS does not publish debug packages; keep the release slim.
 rm -f "$out"/*-debug-*.pkg.tar.zst
 printf '%s\n' "$version" > "$out/VERSION"
+printf '%s\n' "$(cachyos_version)" > "$out/UPSTREAM"
 
-log "hyprland $version built ($pkgarch, patch=compiled)"
+log "hyprland $version built ($pkgarch, hyprgraphics soname ${gfx_so:-unknown}, patch=compiled)"

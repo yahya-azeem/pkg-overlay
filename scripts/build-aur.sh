@@ -56,6 +56,7 @@ done
 [[ -n "$version" ]] || version="$(bsdtar -xOf "${built[0]}" .PKGINFO | awk -F' = ' '/^pkgver/{print $2; exit}')"
 [[ -n "$version" ]] || die "could not read the built version"
 printf '%s\n' "$version" > "$out/VERSION"
+printf '%s\n' "$version" > "$out/UPSTREAM"
 
 rm -rf "$work"
 log "$UPSTREAM $version built"

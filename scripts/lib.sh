@@ -12,9 +12,21 @@ package_dirs() {
     find "$ROOT/packages" -mindepth 1 -maxdepth 1 -type d | sort
 }
 
+_state_line() {
+    local file="$ROOT/state/$(basename "$1").txt"
+    [[ -f "$file" ]] && head -1 "$file" || true
+}
+
 state_version() {
-    local dir=$1 file="$ROOT/state/$(basename "$1").txt"
-    [[ -f "$file" ]] && cat "$file" || true
+    local line
+    line="$(_state_line "$1")"
+    [[ -n "$line" ]] && awk '{print $1}' <<<"$line" || true
+}
+
+state_upstream() {
+    local line
+    line="$(_state_line "$1")"
+    [[ -n "$line" ]] && awk '{print $2}' <<<"$line" || true
 }
 
 cachyos_db() {
@@ -69,35 +81,52 @@ aur_version() {
 }
 
 # Print the version this repository would build right now for a package dir.
+# The CachyOS repository set is authoritative because pacman gives it priority;
+# Arch versions are only used as a floor so the overlay still supersedes them.
 desired_version() {
-    local ver base rel our_rel
+    local dir="${1:-}" ver base rel our_rel prev prev_base prev_rel
+    local floor base_plus prev_plus arch arel
     case "${TRACK:-}" in
         cachyos)
-            # A full pacman -Syu upgrades to the newest version across every
-            # enabled repo, so the overlay has to sit above both CachyOS and
-            # Arch for the patched package to win the transaction.
-            local cachy arch chosen
-            cachy="$(cachyos_version "$UPSTREAM" || true)"
+            ver="$(cachyos_version "$UPSTREAM")" || return 1
+            [[ -n "$ver" ]] || return 1
+            base="${ver%-*}"
+            rel="${ver##*-}"
+            floor="$rel"
             arch="$(archrepo_version "$UPSTREAM" || true)"
-            [[ -n "$cachy" || -n "$arch" ]] || return 1
-            if [[ -z "$cachy" ]]; then
-                chosen="$arch"
-            elif [[ -z "$arch" ]]; then
-                chosen="$cachy"
-            else
-                chosen="$(newest_version "$cachy" "$arch")"
+            if [[ -n "$arch" ]]; then
+                arel="${arch##*-}"
+                floor="$(newest_version "$rel" "$arel")"
             fi
-            base="${chosen%-*}"
-            rel="${chosen##*-}"
-            our_rel="$(awk -v r="$rel" 'BEGIN { printf "%.1f", r + 0.1 }')"
+            base_plus="$(awk -v r="$floor" 'BEGIN { printf "%.1f", r + 0.1 }')"
+            our_rel="$base_plus"
+            prev="$(state_version "$dir")"
+            if [[ -n "$prev" ]]; then
+                prev_base="${prev%-*}"
+                prev_rel="${prev##*-}"
+                if [[ "$prev_base" == "$base" ]]; then
+                    prev_plus="$(awk -v r="$prev_rel" 'BEGIN { printf "%.1f", r + 0.1 }')"
+                    our_rel="$(newest_version "$base_plus" "$prev_plus")"
+                fi
+            fi
             printf '%s-%s\n' "$base" "$our_rel"
             ;;
         aur)
-            aur_version "$UPSTREAM"
+            ver="$(aur_version "$UPSTREAM")"
+            [[ -n "$ver" ]] || return 1
+            printf '%s\n' "$ver"
             ;;
         *)
             die "unknown TRACK '$TRACK' in $(basename "$PWD")/meta.sh"
             ;;
+    esac
+}
+
+desired_upstream() {
+    case "${TRACK:-}" in
+        cachyos) cachyos_version "$UPSTREAM" ;;
+        aur) aur_version "$UPSTREAM" ;;
+        *) return 1 ;;
     esac
 }
 
