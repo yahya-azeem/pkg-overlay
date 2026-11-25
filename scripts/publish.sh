@@ -31,15 +31,24 @@ done
 
 (( ${#packages[@]} )) || die "no built packages found under $out"
 
-log "generating pacman database"
-repo-add --quiet "$repo/pkg-overlay.db.tar.zst" "${packages[@]}"
-
 tag="pkg-repo"
-if ! gh release view "$tag" -R "${GITHUB_REPOSITORY:-yahya-azeem/pkg-overlay}" >/dev/null 2>&1; then
-    gh release create "$tag" -R "${GITHUB_REPOSITORY:-yahya-azeem/pkg-overlay}" \
+slug="${GITHUB_REPOSITORY:-yahya-azeem/pkg-overlay}"
+if ! gh release view "$tag" -R "$slug" >/dev/null 2>&1; then
+    gh release create "$tag" -R "$slug" \
         --title "pkg-overlay rolling repository" \
         --notes "Rolling pacman repository for yahya-azeem/pkg-overlay. See the README for the pacman.conf entry."
 fi
+
+# Seed the database from the release so packages that were not rebuilt in this
+# run keep their entries. repo-add merges into an existing database.
+base="https://github.com/$slug/releases/download/$tag"
+for db in pkg-overlay.db.tar.zst pkg-overlay.files.tar.zst; do
+    curl -fsSL --retry 3 --connect-timeout 15 "$base/$db" -o "$repo/$db" 2>/dev/null \
+        || rm -f "$repo/$db"
+done
+
+log "updating pacman database"
+repo-add --quiet "$repo/pkg-overlay.db.tar.zst" "${packages[@]}"
 
 assets=("$repo"/*.pkg.tar.zst "$repo"/pkg-overlay.db.tar.zst "$repo"/pkg-overlay.db \
         "$repo"/pkg-overlay.files.tar.zst "$repo"/pkg-overlay.files)
