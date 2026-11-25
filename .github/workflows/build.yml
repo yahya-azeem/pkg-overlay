@@ -65,26 +65,6 @@ jobs:
           fi
           pacman -Sy --noconfirm
 
-      - name: Pin the Hypr stack to CachyOS builds
-        run: |
-          # The base image resolves core/extra first, but the target machine
-          # gets its Hypr sonames from CachyOS. Install those exact packages so
-          # the linked sonames match the CachyOS stack.
-          pacman -S --noconfirm --needed \
-            cachyos-extra-v3/aquamarine \
-            cachyos-extra-v3/hyprcursor \
-            cachyos-extra-v3/hyprgraphics \
-            cachyos-extra-v3/hyprlang \
-            cachyos-extra-v3/hyprutils \
-            cachyos-extra-v3/hyprwire \
-            cachyos-extra-v3/hyprtoolkit \
-            cachyos-extra-v3/hyprland-guiutils \
-            cachyos-extra-v3/hyprland-protocols
-          # Freeze the pinned stack: a later `pacman -S --needed` would
-          # otherwise upgrade hyprgraphics to extra's newer soname.
-          sed -i '/^\[options\]/a IgnorePkg = hyprgraphics hyprtoolkit hyprutils hyprlang hyprcursor hyprwire aquamarine hyprland-guiutils hyprland-protocols' /etc/pacman.conf
-          pacman -Q hyprgraphics hyprtoolkit
-          ls /usr/lib/libhyprgraphics.so.*
       - uses: actions/checkout@v4
       - name: Build ${{ matrix.pkg }}
         run: scripts/ci-build.sh "${{ matrix.pkg }}"

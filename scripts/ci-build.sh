@@ -39,6 +39,17 @@ if (( ${#deps[@]} )); then
     fi
 fi
 
+# Package-specific pinning runs after dependency installation, because a
+# later `pacman -S --needed` would otherwise upgrade pinned libraries.
+if [[ -x "$dir/pin.sh" ]]; then
+    log "$name: pinning package-specific library versions"
+    if (( is_root )); then
+        "$dir/pin.sh"
+    else
+        warn "not root; skipping $name/pin.sh"
+    fi
+fi
+
 log "$name: building into $out"
 if (( is_root )); then
     runuser -u builder -- env OUT="$out" "$ROOT/scripts/build-one.sh" "$dir"
