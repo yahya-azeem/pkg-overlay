@@ -1,0 +1,8 @@
+out/
+.cache/
+packages/*/src/
+packages/*/pkg/
+packages/*/src-cache/
+packages/*/aur-src/
+*.pkg.tar.zst
+*.pkg.tar.zst.sig

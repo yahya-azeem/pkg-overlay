@@ -1,0 +1,163 @@
+diff --git a/src/config/values/ConfigValues.cpp b/src/config/values/ConfigValues.cpp
+index 8b0d9a5..a0a889d 100644
+--- a/src/config/values/ConfigValues.cpp
++++ b/src/config/values/ConfigValues.cpp
+@@ -666,6 +666,7 @@ std::vector<SP<IValue>> Values::getConfigValues() {
+         MS<Int>("render:direct_scanout", "Enables direct scanout.", 0, {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"auto", 2}}}),
+         MS<Bool>("render:expand_undersized_textures", "Whether to expand textures that have not yet resized to be larger.", true),
+         MS<Bool>("render:xp_mode", "Disable back buffer and bottom layer rendering.", false),
++        MS<Bool>("render:no_screen_share_omit", "Omit no_screen_share windows and layers from monitor/region captures by re-rendering the scene without them, instead of drawing black boxes.", false),
+         MS<Int>("render:ctm_animation", "Whether to enable a fade animation for CTM changes.", 2,
+                 {.min = 0, .max = 2, .map = OptionMap{{"disable", 0}, {"enable", 1}, {"auto", 2}}}),
+         MS<Bool>("render:cm_enabled", "Enable Color Management pipelines (requires restart to fully take effect)", true),
+diff --git a/src/managers/screenshare/ScreenshareFrame.cpp b/src/managers/screenshare/ScreenshareFrame.cpp
+index 67e3381..eada772 100644
+--- a/src/managers/screenshare/ScreenshareFrame.cpp
++++ b/src/managers/screenshare/ScreenshareFrame.cpp
+@@ -7,6 +7,7 @@
+ #include "../../protocols/ColorManagement.hpp"
+ #include "../../Compositor.hpp"
+ #include "../../render/Renderer.hpp"
++#include "../../config/ConfigValue.hpp"
+ #include "../../render/SceneResources.hpp"
+ #include "../../render/scene/SceneSelection.hpp"
+ #include "../../render/OpenGL.hpp"
+@@ -16,6 +17,7 @@
+ #include "../../desktop/view/window/Window.hpp"
+ #include "../../desktop/view/window/WindowPresentation.hpp"
+ #include "../../desktop/state/FocusState.hpp"
++#include "../../desktop/state/FadingOutState.hpp"
+ #include "../../render/pass/ClearPassElement.hpp"
+ #include "../../render/pass/RectPassElement.hpp"
+ #include "helpers/cm/ColorManagement.hpp"
+@@ -202,7 +204,12 @@ void CScreenshareFrame::renderMonitor(Render::CRenderContext& ctx) {
+ 
+     const auto PMONITOR = m_session->monitor();
+ 
+-    auto       TEXTURE = ctx.m_data.pMonitor->resources()->getMirrorTexture();
++    if (m_omitHidden && ctx.m_renderingCapture) {
++        renderMonitorOmitHidden(ctx);
++        return;
++    }
++
++    auto TEXTURE = ctx.m_data.pMonitor->resources()->getMirrorTexture();
+     if (!TEXTURE) {
+         LOG(Log::ERR, "Invalid source texture");
+         return;
+@@ -335,6 +342,33 @@ void CScreenshareFrame::renderMonitor(Render::CRenderContext& ctx) {
+     }
+ }
+ 
++// Instead of copying the finished monitor texture and painting black boxes over no_screen_share content,
++// render the monitor scene again in capture mode. In capture mode the renderer skips those windows/layers
++// (including shadows, borders, popups), so what was underneath them shows up in the capture.
++void CScreenshareFrame::renderMonitorOmitHidden(Render::CRenderContext& ctx) {
++    const auto PMONITOR = m_session->monitor();
++    const auto NOW      = Time::steadyNow();
++
++    ctx.m_data.fbSize = m_bufferSize;
++    g_pHyprRenderer->setProjectionType(ctx, Render::RPT_EXPORT);
++    ctx.m_data.transformDamage = false;
++    ctx.m_data.noSimplify      = true;
++    g_pHyprRenderer->setViewport(0, 0, m_bufferSize.x, m_bufferSize.y);
++
++    // geometry shifted by the capture region origin, same size as the monitor -> scale stays 1
++    const CBox GEOMETRY = {-m_session->m_captureBox.x, -m_session->m_captureBox.y, static_cast<int>(PMONITOR->m_transformedSize.x), static_cast<int>(PMONITOR->m_transformedSize.y)};
++
++    g_pHyprRenderer->startRenderPass(ctx);
++    g_pHyprRenderer->renderWorkspace(ctx, PMONITOR, PMONITOR->m_activeWorkspace, NOW, GEOMETRY);
++    g_pHyprRenderer->renderIME(ctx, PMONITOR, NOW, GEOMETRY);
++
++    if (m_overlayCursor) {
++        CRegion  fakeDamage = {0, 0, m_bufferSize.x, m_bufferSize.y};
++        Vector2D cursorPos  = Pointer::mgr()->untransformedPosition() - PMONITOR->m_position - m_session->m_captureBox.pos() / PMONITOR->m_scale;
++        Pointer::mgr()->renderSoftwareCursorsFor(ctx, PMONITOR, NOW, fakeDamage, cursorPos, true);
++    }
++}
++
+ void CScreenshareFrame::renderWindow(Render::CRenderContext& ctx) {
+     if (m_session->m_type != SHARE_WINDOW || done())
+         return;
+@@ -439,10 +473,49 @@ void CScreenshareFrame::render(Render::CRenderContext& ctx) {
+     }
+ }
+ 
++bool CScreenshareFrame::shouldOmitHidden() const {
++    static auto POMIT = CConfigValue<Config::BOOL>("render:no_screen_share_omit");
++
++    if (!*POMIT || (m_session->m_type != SHARE_MONITOR && m_session->m_type != SHARE_REGION))
++        return false;
++
++    const auto PMONITOR = m_session->monitor();
++    if (!PMONITOR || PMONITOR->isMirror() || PMONITOR->m_transform != WL_OUTPUT_TRANSFORM_NORMAL || g_pSessionLockManager->isSessionLocked())
++        return false;
++
++    // only pay for a second scene render if something is actually hidden on this monitor
++    for (auto const& l : Desktop::layerState()->layers()) {
++        if (!l->m_ruleApplicator->noScreenShare().valueOrDefault())
++            continue;
++        if (l->mapped() && l->acceptsInput() && l->alphaNonZero())
++            return true;
++    }
++
++    for (auto const& w : Desktop::windowState()->windows()) {
++        if (!w->m_ruleApplicator->noScreenShare().valueOrDefault())
++            continue;
++        if (w->isHidden() || !g_pHyprRenderer->shouldRenderWindow(w, PMONITOR))
++            continue;
++        return true;
++    }
++
++    // close/fade-out animations of hidden windows live outside the window list
++    for (auto const& f : Desktop::fadingOutState()->fadeouts()) {
++        if (f && f->monitor() == PMONITOR && f->source().noScreenShare)
++            return true;
++    }
++
++    return false;
++}
++
+ bool CScreenshareFrame::beginCopy(SP<Render::IFramebuffer> framebuffer) {
+     const bool             WORKSPACE = m_session->m_type == SHARE_WORKSPACE;
+     Render::SRenderOptions options;
+-    if (WORKSPACE) {
++
++    m_omitHidden     = shouldOmitHidden();
++    const bool SCENE = WORKSPACE || m_omitHidden;
++
++    if (SCENE) {
+         if (!m_session->m_sceneResources)
+             m_session->m_sceneResources = makeShared<Render::CSceneResources>(g_pHyprRenderer->createFB("workspace capture blur"),
+                                                                               Render::SSceneBufferDescription{
+@@ -461,8 +534,8 @@ bool CScreenshareFrame::beginCopy(SP<Render::IFramebuffer> framebuffer) {
+     auto& ctx = g_pHyprRenderer->context();
+     ctx.m_data.outFB->setImageDescription(NColorManagement::DEFAULT_SRGB_IMAGE_DESCRIPTION);
+     ctx.m_data.blockScreenShader = true;
+-    ctx.m_renderingCapture       = WORKSPACE;
+-    ctx.m_blockSurfaceFeedback   = WORKSPACE;
++    ctx.m_renderingCapture       = SCENE;
++    ctx.m_blockSurfaceFeedback   = SCENE;
+     return true;
+ }
+ 
+diff --git a/src/managers/screenshare/ScreenshareManager.hpp b/src/managers/screenshare/ScreenshareManager.hpp
+index fa1eabd..c047eb5 100644
+--- a/src/managers/screenshare/ScreenshareManager.hpp
++++ b/src/managers/screenshare/ScreenshareManager.hpp
+@@ -191,12 +191,15 @@ namespace Screenshare {
+         bool                    m_copyInFlight  = false; // a dmabuf copy is issued and waiting on its fence
+         bool                    m_overlayCursor = true;
+         bool                    m_isFirst       = false;
++        bool                    m_omitHidden    = false; // monitor/region capture re-renders the scene, skipping no_screen_share content
+ 
+         //
+         void copy();
+         bool copyDmabuf();
+         bool copyShm();
+         bool beginCopy(SP<Render::IFramebuffer> framebuffer = nullptr);
++        bool shouldOmitHidden() const;
++        void renderMonitorOmitHidden(Render::CRenderContext& ctx);
+ 
+         void render(Render::CRenderContext& ctx);
+         void renderMonitor(Render::CRenderContext& ctx);
+

@@ -1,0 +1,91 @@
+name: build overlay packages
+
+on:
+  schedule:
+    # CachyOS and the AUR move continuously; four checks a day is plenty.
+    - cron: "23 2,8,14,20 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/**"
+      - "scripts/**"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pkg-overlay
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install helpers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libarchive-tools jq
+      - name: Compare upstream versions
+        id: detect
+        run: scripts/detect.sh
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: cachyos/cachyos:latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+    steps:
+      - name: Enable CachyOS x86_64_v3 repositories
+        run: |
+          pacman -Sy --noconfirm --needed git
+          if ! grep -q '^\[cachyos-extra-v3\]' /etc/pacman.conf; then
+            cat >> /etc/pacman.conf <<'EOF'
+
+[cachyos-v3]
+Include = /etc/pacman.d/cachyos-v3-mirrorlist
+
+[cachyos-core-v3]
+Include = /etc/pacman.d/cachyos-v3-mirrorlist
+
+[cachyos-extra-v3]
+Include = /etc/pacman.d/cachyos-v3-mirrorlist
+EOF
+          fi
+          pacman -Sy --noconfirm
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.pkg }}
+        run: scripts/ci-build.sh "${{ matrix.pkg }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg }}
+          path: out/${{ matrix.pkg }}/*
+          if-no-files-found: error
+
+  publish:
+    needs: [detect, build]
+    if: always() && needs.detect.outputs.any == 'true' && needs.build.result != 'cancelled'
+    runs-on: ubuntu-latest
+    container:
+      image: cachyos/cachyos:latest
+    steps:
+      - name: Install helpers
+        run: pacman -Sy --noconfirm --needed git github-cli
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish rolling repository
+        run: scripts/publish.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
