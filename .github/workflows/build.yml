@@ -50,17 +50,17 @@ jobs:
         run: |
           pacman -Sy --noconfirm --needed git
           if ! grep -q '^\[cachyos-extra-v3\]' /etc/pacman.conf; then
-            cat >> /etc/pacman.conf <<'EOF'
-
-[cachyos-v3]
-Include = /etc/pacman.d/cachyos-v3-mirrorlist
-
-[cachyos-core-v3]
-Include = /etc/pacman.d/cachyos-v3-mirrorlist
-
-[cachyos-extra-v3]
-Include = /etc/pacman.d/cachyos-v3-mirrorlist
-EOF
+            printf '%s\n' \
+              '' \
+              '[cachyos-v3]' \
+              'Include = /etc/pacman.d/cachyos-v3-mirrorlist' \
+              '' \
+              '[cachyos-core-v3]' \
+              'Include = /etc/pacman.d/cachyos-v3-mirrorlist' \
+              '' \
+              '[cachyos-extra-v3]' \
+              'Include = /etc/pacman.d/cachyos-v3-mirrorlist' \
+              >> /etc/pacman.conf
           fi
           pacman -Sy --noconfirm
       - uses: actions/checkout@v4
