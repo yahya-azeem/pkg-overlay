@@ -77,3 +77,15 @@ desired_version() {
             ;;
     esac
 }
+
+# GitHub artifacts and release assets cannot contain ':'; the epoch separator
+# is the only realistic offender. repo-add records the actual filename, so
+# renaming the archive is safe (the package's internal pkgver keeps the epoch).
+sanitize_pkg_names() {
+    local dir=$1 f new
+    shopt -s nullglob
+    for f in "$dir"/*.pkg.tar.zst; do
+        new="${f//:/_}"
+        [[ "$f" == "$new" ]] || mv -f "$f" "$new"
+    done
+}

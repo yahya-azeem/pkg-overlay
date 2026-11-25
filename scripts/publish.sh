@@ -18,6 +18,7 @@ for dir in "$out"/*/; do
     [[ -f "$dir/VERSION" ]] || continue
     version="$(cat "$dir/VERSION")"
 
+    sanitize_pkg_names "$dir"
     mapfile -t built < <(compgen -G "$dir/*.pkg.tar.zst" | grep -v -- '-debug-' | sort)
     (( ${#built[@]} )) || { warn "$name: no packages in $dir"; continue; }
 

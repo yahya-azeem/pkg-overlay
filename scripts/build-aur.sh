@@ -39,6 +39,7 @@ export PKGDEST="$out"
 log "building $UPSTREAM from the AUR snapshot"
 makepkg -f --noconfirm --nodeps
 
+sanitize_pkg_names "$out"
 mapfile -t built < <(compgen -G "$out/*.pkg.tar.zst" | grep -v -- '-debug-' | sort)
 (( ${#built[@]} )) || die "makepkg produced no package for $UPSTREAM"
 rm -f "$out"/*-debug-*.pkg.tar.zst

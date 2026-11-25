@@ -10,6 +10,7 @@ set -Eeuo pipefail
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PATCH="$DIR/noscreenshare-omit.patch"
 CONF="$DIR/makepkg-v3.conf"
+source "$(cd -- "$DIR/../.." && pwd)/scripts/lib.sh"
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m==>\033[0m %s\n' "$*" >&2; exit 1; }
@@ -104,6 +105,7 @@ export MAKEFLAGS="${MAKEFLAGS:--j$(nproc)}"
 
 makepkg --config "$CONF" -f --nodeps --noconfirm
 
+sanitize_pkg_names "$out"
 mapfile -t built < <(compgen -G "$out/hyprland-$version-*.pkg.tar.zst" | grep -v -- '-debug-' | sort)
 (( ${#built[@]} == 1 )) || die "expected one hyprland package, found ${#built[@]}"
 main_pkg="${built[0]}"
