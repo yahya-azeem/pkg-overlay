@@ -30,6 +30,12 @@ SigLevel = Optional TrustAll
 Server = https://github.com/yahya-azeem/pkg-overlay/releases/download/pkg-repo
 ```
 
+Or let the helper insert the block (it makes a timestamped backup first):
+
+```sh
+sudo ./contrib/install-overlay.sh
+```
+
 Then:
 
 ```sh
@@ -91,6 +97,10 @@ state/<name>.txt            version that was last published
 If the Hyprland patch stops applying to a new release, the build fails and the
 previous package stays published; the failure is visible in the Actions run.
 
+`state/<package>.txt` records the last published version. If it matches the
+upstream version, `detect` skips the build entirely. The first run builds
+everything; Hyprland takes roughly 18 minutes.
+
 ## Add another package
 
 For an AUR package:
@@ -110,10 +120,20 @@ like `packages/hyprland/build.sh`.
 
 ## Private packages
 
-MATLAB (`matlab-mpm`) is published from
-`github.com/yahya-azeem/pkg-overlay-private` because its license does not
-allow public redistribution. Fetch it with `gh` and install locally; see that
-repository's README.
+MATLAB (`matlab-mpm`) is published from the private
+`github.com/yahya-azeem/pkg-overlay-private` repository because its license
+does not allow public redistribution. Fetch it with the authenticated `gh`
+CLI and serve it from a local file repository:
+
+```sh
+gh repo clone yahya-azeem/pkg-overlay-private
+~/pkg-overlay-private/fetch.sh
+```
+
+See that repository's README for the `pacman.conf` block. GitHub release
+assets cannot contain `:`, so the MATLAB archive is published as
+`matlab-mpm-1_...`; the package's internal epoch is unchanged and `repo-add`
+records the real filename.
 
 ## Manual build
 
