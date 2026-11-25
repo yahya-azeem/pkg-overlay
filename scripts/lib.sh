@@ -49,6 +49,17 @@ cachyos_version() {
     printf '%s\n' "$ver"
 }
 
+archrepo_version() {
+    local pkg=$1 repo=${ARCH_REPO:-extra}
+    curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 \
+        "https://archlinux.org/packages/$repo/x86_64/$pkg/json/" \
+        | jq -r '"\(.pkgver)-\(.pkgrel)"'
+}
+
+newest_version() {
+    printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1
+}
+
 aur_version() {
     local pkg=$1
     curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 \
@@ -62,10 +73,22 @@ desired_version() {
     local ver base rel our_rel
     case "${TRACK:-}" in
         cachyos)
-            ver="$(cachyos_version "$UPSTREAM")" || return 1
-            [[ -n "$ver" ]] || return 1
-            base="${ver%-*}"
-            rel="${ver##*-}"
+            # A full pacman -Syu upgrades to the newest version across every
+            # enabled repo, so the overlay has to sit above both CachyOS and
+            # Arch for the patched package to win the transaction.
+            local cachy arch chosen
+            cachy="$(cachyos_version "$UPSTREAM" || true)"
+            arch="$(archrepo_version "$UPSTREAM" || true)"
+            [[ -n "$cachy" || -n "$arch" ]] || return 1
+            if [[ -z "$cachy" ]]; then
+                chosen="$arch"
+            elif [[ -z "$arch" ]]; then
+                chosen="$cachy"
+            else
+                chosen="$(newest_version "$cachy" "$arch")"
+            fi
+            base="${chosen%-*}"
+            rel="${chosen##*-}"
             our_rel="$(awk -v r="$rel" 'BEGIN { printf "%.1f", r + 0.1 }')"
             printf '%s-%s\n' "$base" "$our_rel"
             ;;

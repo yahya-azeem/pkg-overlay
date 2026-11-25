@@ -48,26 +48,29 @@ sudo pacman -S arduino-ide-bin
 they are built from public recipes by GitHub Actions and published to this
 repository's release assets.
 
-### Keeping the patched Hyprland
+### Upgrading
 
-When CachyOS bumps Hyprland, this repo rebuilds it with the patch on the next
-scheduled run (four times a day). Between the CachyOS update and that rebuild,
-a `pacman -Syu` can replace the patched package with the stock one. Hold it:
-
-```ini
-# /etc/pacman.conf
-IgnorePkg = hyprland hyprpm
-```
-
-With the hold, `pacman -Syu` keeps your patched build; install the rebuilt
-package manually when it appears:
+Always use a full upgrade, never `pacman -Sy` followed by `pacman -S`:
 
 ```sh
-sudo pacman -Syu --ignore hyprland,hyprpm
-sudo pacman -U ~/Downloads/hyprland-*.pkg.tar.zst
+sudo pacman -Syu
 ```
 
-Or temporarily drop the hold, upgrade, and reinstall the overlay package.
+That one rule prevents the hyprgraphics/hyprlock soname mismatch. The overlay
+package is versioned as `max(CachyOS pkgrel, Arch pkgrel) + 0.1`, so it is
+always newer than both repos and a normal `-Syu` keeps the patched Hyprland
+while upgrading `hyprgraphics`, `hyprlock`, `hyprtoolkit` and friends in the
+same transaction.
+
+Today, for example, CachyOS ships `hyprgraphics 0.6.0` while Arch `extra`
+ships `0.7.0`. A full `-Syu` moves the whole Hypr stack to 0.7.0 together and
+installs the overlay Hyprland built against that same set. Do not install the
+overlay package with `pacman -S` after only `pacman -Sy`; that is a partial
+upgrade and will break the stack.
+
+No `IgnorePkg` is needed. The only exposure is a brand-new upstream release
+before the CI rebuild lands: during that window `-Syu` can take the stock
+package, and the next `-Syu` after CI finishes restores the patched one.
 
 ## How the build works
 
@@ -86,8 +89,9 @@ state/<name>.txt            version that was last published
 1. **detect** reads the CachyOS database and the AUR RPC API and compares
    versions with `state/`. Only changed packages are built.
 2. **build** runs one matrix job per changed package in
-   `cachyos/cachyos:latest`, with the `cachyos-*-v3` repositories enabled, so
-   dependencies match what CachyOS ships. Hyprland is built with the
+   `cachyos/cachyos:latest`, with the `cachyos-*-v3` repositories enabled.
+   Dependencies resolve to the newest version across CachyOS and Arch, which
+   is exactly what a full `pacman -Syu` would install. Hyprland is built with the
    `x86_64_v3` devtools profile (`-march=x86-64-v3`, LTO, zstd ultra-20) and
    the patch is verified to be compiled into the binary.
 3. **publish** adds every artifact to `pkg-overlay.db.tar.zst`, uploads the

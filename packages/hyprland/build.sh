@@ -15,17 +15,15 @@ source "$(cd -- "$DIR/../.." && pwd)/scripts/lib.sh"
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m==>\033[0m %s\n' "$*" >&2; exit 1; }
 
-# CachyOS's version, not the plain Arch extra one.
-cachyos_version() {
-    pacman -Si hyprland | awk -F': *' '
-        /^Repository/ { repo = $2 }
-        /^Version/    { if (repo ~ /^cachyos/) { print $2; exit } }
-    '
+# The version a full `pacman -Syu` would land on: the newest across every
+# enabled repo (CachyOS x86_64_v3 and Arch extra currently diverge).
+target_version() {
+    pacman -Si hyprland | awk -F': *' '/^Version/ { print $2 }' | sort -V | tail -1
 }
 
 generate_pkgbuild() {
     local ver base rel arch_rel our_rel tag url tmp patch_sha
-    ver="$(cachyos_version)"
+    ver="$(target_version)"
     [[ -n "$ver" ]] || die "cannot read hyprland version from pacman"
     ver="${ver#*:}"
 
