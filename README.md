@@ -89,9 +89,11 @@ state/<name>.txt            version that was last published
 1. **detect** reads the CachyOS database and the AUR RPC API and compares
    versions with `state/`. Only changed packages are built.
 2. **build** runs one matrix job per changed package in
-   `cachyos/cachyos:latest`, with the `cachyos-*-v3` repositories inserted
-   **before** Arch's `core`/`extra`, matching pacman's priority on the target
-   machine. Dependencies therefore resolve to the same versions CachyOS ships.
+   `cachyos/cachyos:latest`. The Hypr stack (`hyprgraphics`, `hyprutils`,
+   `hyprlang`, `hyprcursor`, `hyprwire`, `aquamarine`, `hyprtoolkit`,
+   `hyprland-guiutils`) is installed explicitly from `cachyos-extra-v3`, so
+   Hyprland links the same sonames the target CachyOS system uses. Build tools
+   still come from the normal repos, avoiding base-image toolchain downgrades.
    Hyprland is built with the
    `x86_64_v3` devtools profile (`-march=x86-64-v3`, LTO, zstd ultra-20) and
    the patch is verified to be compiled into the binary.

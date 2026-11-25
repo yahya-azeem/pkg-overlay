@@ -80,6 +80,9 @@ jobs:
             cachyos-extra-v3/hyprtoolkit \
             cachyos-extra-v3/hyprland-guiutils \
             cachyos-extra-v3/hyprland-protocols
+          # Freeze the pinned stack: a later `pacman -S --needed` would
+          # otherwise upgrade hyprgraphics to extra's newer soname.
+          sed -i '/^\[options\]/a IgnorePkg = hyprgraphics hyprtoolkit hyprutils hyprlang hyprcursor hyprwire aquamarine hyprland-guiutils hyprland-protocols' /etc/pacman.conf
           pacman -Q hyprgraphics hyprtoolkit
           ls /usr/lib/libhyprgraphics.so.*
       - uses: actions/checkout@v4
