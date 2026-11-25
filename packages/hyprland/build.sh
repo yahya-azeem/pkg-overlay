@@ -90,6 +90,7 @@ if [[ "${1:-}" == "--print-deps" ]]; then
 fi
 
 out="${1:?usage: build.sh <outdir>}"
+cd "$DIR"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 

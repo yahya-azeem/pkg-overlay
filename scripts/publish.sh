@@ -5,6 +5,8 @@ set -Eeuo pipefail
 
 source "$(dirname -- "$0")/lib.sh"
 
+git config --global --add safe.directory "$ROOT" 2>/dev/null || true
+
 shopt -s nullglob
 out="$ROOT/out"
 repo="$out/repo"
@@ -32,8 +34,8 @@ log "generating pacman database"
 repo-add --quiet "$repo/pkg-overlay.db.tar.zst" "${packages[@]}"
 
 tag="pkg-repo"
-if ! gh release view "$tag" >/dev/null 2>&1; then
-    gh release create "$tag" \
+if ! gh release view "$tag" -R "${GITHUB_REPOSITORY:-yahya-azeem/pkg-overlay}" >/dev/null 2>&1; then
+    gh release create "$tag" -R "${GITHUB_REPOSITORY:-yahya-azeem/pkg-overlay}" \
         --title "pkg-overlay rolling repository" \
         --notes "Rolling pacman repository for yahya-azeem/pkg-overlay. See the README for the pacman.conf entry."
 fi
@@ -46,7 +48,7 @@ for asset in "${assets[@]}"; do
 done
 
 log "uploading ${#existing[@]} assets to release $tag"
-gh release upload "$tag" "${existing[@]}" --clobber
+gh release upload "$tag" "${existing[@]}" -R "${GITHUB_REPOSITORY:-yahya-azeem/pkg-overlay}" --clobber
 
 if [[ ! -d "$ROOT/.git" ]]; then
     warn "not a git checkout; skipping state commit"

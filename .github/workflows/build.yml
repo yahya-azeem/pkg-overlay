@@ -49,6 +49,7 @@ jobs:
       - name: Enable CachyOS x86_64_v3 repositories
         run: |
           pacman -Sy --noconfirm --needed git
+          sed -i '/^\[options\]/a DisableSandboxNetwork' /etc/pacman.conf
           if ! grep -q '^\[cachyos-extra-v3\]' /etc/pacman.conf; then
             printf '%s\n' \
               '' \
